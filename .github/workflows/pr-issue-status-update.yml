@@ -12,42 +12,254 @@ jobs:
   update-linked-issue:
     runs-on: ubuntu-latest
     steps:
-      # Check out the current repository first
+      # Check out the current repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Then check out the GitHub Actions repository
-      - name: Checkout GitHub Actions
-        uses: actions/checkout@v4
-        with:
-          repository: idynic/idynic-github-actions
-          path: .github/actions/idynic-github-actions
-          token: ${{ secrets.PROJECT_TOKEN }}
-
+      # Instead of checking out the actions repository, use it directly via full path
       # Extract issue number from PR and determine status update strategy
       - name: Extract issue reference
-        id: extract-issue
-        uses: ./.github/actions/idynic-github-actions/extract-issue-reference
-        with:
-          pr-title: ${{ github.event.pull_request.title }}
-          pr-body: ${{ github.event.pull_request.body }}
-          pr-branch: ${{ github.event.pull_request.head.ref }}
-          pr-action: ${{ github.event.action }}
-          check-update-status-tag: "true"
+        id: extract
+        shell: bash
+        run: |
+          # First check title for common issue references
+          ISSUE_NUMBER=$(echo "${{ github.event.pull_request.title }}" | grep -o -E '([Ff]ix(es|ed)?|[Cc]los(e|es|ed)|[Rr]esolv(e|es|ed)|[Ii]ssue|#)[[:space:]]*#?[0-9]+' | grep -o '[0-9]\+' | head -1)
+          
+          # If not found in title, extract from beginning of body (safer)
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # Write PR body to file with single quotes to avoid shell interpretation issues
+            echo '${{ github.event.pull_request.body }}' | head -n 10 > pr_body.txt
+            ISSUE_NUMBER=$(grep -o -E '([Ff]ix(es|ed)?|[Cc]los(e|es|ed)|[Rr]esolv(e|es|ed)|[Ii]ssue|#)[[:space:]]*#?[0-9]+' pr_body.txt | grep -o '[0-9]\+' | head -1)
+          fi
+          
+          # If not found, try to extract from branch name (issue-123-description or issue-123)
+          if [ -z "$ISSUE_NUMBER" ]; then
+            BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+            if [[ "$BRANCH_NAME" =~ ^issue-([0-9]+) ]]; then
+              ISSUE_NUMBER="${BASH_REMATCH[1]}"
+            fi
+          fi
+          
+          if [ -n "$ISSUE_NUMBER" ]; then
+            echo "Found issue number: #$ISSUE_NUMBER"
+            echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          else
+            echo "No issue number found in PR title, body, or branch name"
+          fi
+          
+          # For all events, log extraction results for diagnostics
+          echo "Event type: ${{ github.event.action }}"
+          echo "Issue extraction result: ${ISSUE_NUMBER:-none}"
+          
+          # Determine if status should be updated
+          SHOULD_UPDATE="false"
+          STATUS=""
+          
+          if [ -n "$ISSUE_NUMBER" ]; then
+            if [ "${{ github.event.action }}" == "opened" ] || [ "${{ github.event.action }}" == "ready_for_review" ]; then
+              SHOULD_UPDATE="true"
+              STATUS="Waiting for Review"
+              echo "should_update=true" >> $GITHUB_OUTPUT
+              echo "update_status=Waiting for Review" >> $GITHUB_OUTPUT
+              
+            elif [ "${{ github.event.action }}" == "synchronize" ]; then
+              # For synchronize events, only update if PR title contains [update-status]
+              if echo "${{ github.event.pull_request.title }}" | grep -q "\[update-status\]"; then
+                SHOULD_UPDATE="true"
+                STATUS="Waiting for Review"
+                echo "should_update=true" >> $GITHUB_OUTPUT
+                echo "update_status=Waiting for Review" >> $GITHUB_OUTPUT
+              else
+                echo "should_update=false" >> $GITHUB_OUTPUT
+              fi
+              
+            elif [ "${{ github.event.action }}" == "closed" ]; then
+              # For closed PRs, check if it was merged
+              IS_MERGED=$(echo "${{ github.event.pull_request.merged }}" | tr '[:upper:]' '[:lower:]')
+              if [ "$IS_MERGED" == "true" ]; then
+                SHOULD_UPDATE="true"
+                STATUS="Done"
+                echo "should_update=true" >> $GITHUB_OUTPUT
+                echo "update_status=Done" >> $GITHUB_OUTPUT
+              else
+                echo "should_update=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "should_update=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should_update=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Determine if comment should be added
+          SHOULD_COMMENT="false"
+          COMMENT_TYPE=""
+          
+          if [ -n "$ISSUE_NUMBER" ]; then
+            if [ "${{ github.event.action }}" == "opened" ]; then
+              SHOULD_COMMENT="true"
+              COMMENT_TYPE="opened"
+              echo "should_comment=true" >> $GITHUB_OUTPUT
+              echo "comment_type=opened" >> $GITHUB_OUTPUT
+              
+            elif [ "${{ github.event.action }}" == "ready_for_review" ]; then
+              SHOULD_COMMENT="true"
+              COMMENT_TYPE="ready"
+              echo "should_comment=true" >> $GITHUB_OUTPUT
+              echo "comment_type=ready" >> $GITHUB_OUTPUT
+              
+            elif [ "${{ github.event.action }}" == "synchronize" ]; then
+              # For synchronize events, only comment if PR title contains [update-status]
+              if echo "${{ github.event.pull_request.title }}" | grep -q "\[update-status\]"; then
+                SHOULD_COMMENT="true"
+                COMMENT_TYPE="sync"
+                echo "should_comment=true" >> $GITHUB_OUTPUT
+                echo "comment_type=sync" >> $GITHUB_OUTPUT
+              else
+                echo "should_comment=false" >> $GITHUB_OUTPUT
+              fi
+              
+            elif [ "${{ github.event.action }}" == "closed" ]; then
+              # For closed PRs, check if it was merged
+              IS_MERGED=$(echo "${{ github.event.pull_request.merged }}" | tr '[:upper:]' '[:lower:]')
+              if [ "$IS_MERGED" == "true" ]; then
+                SHOULD_COMMENT="true"
+                COMMENT_TYPE="merged"
+                echo "should_comment=true" >> $GITHUB_OUTPUT
+                echo "comment_type=merged" >> $GITHUB_OUTPUT
+              else
+                echo "should_comment=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "should_comment=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should_comment=false" >> $GITHUB_OUTPUT
+          fi
 
       # Update issue status if needed
       - name: Update issue status
-        if: steps.extract-issue.outputs.should-update-status == 'true'
-        uses: ./.github/actions/idynic-github-actions/update-issue-status
-        with:
-          issue-number: ${{ steps.extract-issue.outputs.issue-number }}
-          status: ${{ steps.extract-issue.outputs.update-status }}
-          token: ${{ secrets.PROJECT_TOKEN }}
-          organization: ${{ github.repository_owner }}
+        if: steps.extract.outputs.should_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.extract.outputs.issue_number }}
+          STATUS: ${{ steps.extract.outputs.update_status }}
+          ORGANIZATION: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        shell: bash
+        run: |
+          echo "📝 Updating issue #$ISSUE_NUMBER status to '$STATUS'..."
+          
+          # Set default project name to "{repo} project"
+          PROJECT_NAME="${REPO_NAME} project"
+          
+          # GraphQL query to find project by name
+          echo "🔍 Searching for project: $PROJECT_NAME"
+          
+          # Find the project and status field
+          PROJECTS_QUERY=$(cat <<EOF
+          {
+            organization(login: "$ORGANIZATION") {
+              projectsV2(first: 50, query: "$PROJECT_NAME") {
+                nodes {
+                  id
+                  title
+                  field(name: "Status") {
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      options {
+                        id
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          EOF
+          )
+          
+          # Execute the query
+          PROJECTS_RESPONSE=$(gh api graphql -f query="$PROJECTS_QUERY")
+          
+          # Extract project data
+          PROJECT_DATA=$(echo $PROJECTS_RESPONSE | jq -r ".data.organization.projectsV2.nodes[] | select(.title == \"$PROJECT_NAME\")")
+          
+          if [ -z "$PROJECT_DATA" ]; then
+            echo "❌ ERROR: Project '$PROJECT_NAME' not found in organization '$ORGANIZATION'"
+            exit 1
+          fi
+          
+          # Get project ID and field ID
+          PROJECT_ID=$(echo $PROJECT_DATA | jq -r '.id')
+          FIELD_ID=$(echo $PROJECT_DATA | jq -r '.field.id')
+          OPTION_ID=$(echo $PROJECT_DATA | jq -r ".field.options[] | select(.name == \"$STATUS\") | .id")
+          
+          if [ -z "$OPTION_ID" ]; then
+            echo "❌ ERROR: Status '$STATUS' not found in project"
+            echo "Available statuses:"
+            echo $PROJECT_DATA | jq -r '.field.options[].name'
+            exit 1
+          fi
+          
+          # Get the issue's project item ID
+          ISSUE_QUERY=$(cat <<EOF
+          {
+            repository(owner: "$ORGANIZATION", name: "$REPO_NAME") {
+              issue(number: $ISSUE_NUMBER) {
+                projectItems(first: 10) {
+                  nodes {
+                    id
+                    project {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+          EOF
+          )
+          
+          # Execute the query
+          ISSUE_RESPONSE=$(gh api graphql -f query="$ISSUE_QUERY")
+          
+          # Extract item ID
+          ITEM_ID=$(echo $ISSUE_RESPONSE | jq -r ".data.repository.issue.projectItems.nodes[] | select(.project.id == \"$PROJECT_ID\") | .id")
+          
+          if [ -z "$ITEM_ID" ]; then
+            echo "❌ ERROR: Issue #$ISSUE_NUMBER not found in project '$PROJECT_NAME'"
+            exit 1
+          fi
+          
+          # Update the status
+          UPDATE_MUTATION=$(cat <<EOF
+          mutation {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: "$PROJECT_ID"
+              itemId: "$ITEM_ID"
+              fieldId: "$FIELD_ID"
+              value: {
+                singleSelectOptionId: "$OPTION_ID"
+              }
+            }) {
+              projectV2Item {
+                id
+              }
+            }
+          }
+          EOF
+          )
+          
+          # Execute the update
+          UPDATE_RESPONSE=$(gh api graphql -f query="$UPDATE_MUTATION")
+          
+          echo "✅ Successfully updated issue #$ISSUE_NUMBER to status: $STATUS"
 
       # Add appropriate comment to issue
       - name: Add PR opened comment
-        if: steps.extract-issue.outputs.should-comment == 'true' && steps.extract-issue.outputs.comment-type == 'opened'
+        if: steps.extract.outputs.should_comment == 'true' && steps.extract.outputs.comment_type == 'opened'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -55,12 +267,12 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.extract-issue.outputs.issue-number }},
+              issue_number: ${{ steps.extract.outputs.issue_number }},
               body: `📋 Pull Request #${{ github.event.pull_request.number }} opened for this issue: ${{ github.event.pull_request.html_url }}\n\n✅ Issue status updated to: **Waiting for Review**`
             });
 
       - name: Add review ready comment
-        if: steps.extract-issue.outputs.should-comment == 'true' && steps.extract-issue.outputs.comment-type == 'ready'
+        if: steps.extract.outputs.should_comment == 'true' && steps.extract.outputs.comment_type == 'ready'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -68,12 +280,12 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.extract-issue.outputs.issue-number }},
+              issue_number: ${{ steps.extract.outputs.issue_number }},
               body: `📋 Pull Request #${{ github.event.pull_request.number }} is ready for review: ${{ github.event.pull_request.html_url }}\n\n✅ Issue status updated to: **Waiting for Review**`
             });
             
       - name: Add status update comment
-        if: steps.extract-issue.outputs.should-comment == 'true' && steps.extract-issue.outputs.comment-type == 'sync'
+        if: steps.extract.outputs.should_comment == 'true' && steps.extract.outputs.comment_type == 'sync'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -81,12 +293,12 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.extract-issue.outputs.issue-number }},
+              issue_number: ${{ steps.extract.outputs.issue_number }},
               body: `🔄 PR #${{ github.event.pull_request.number }} updated with new commits: ${{ github.event.pull_request.html_url }}\n\n✅ Issue status updated to: **Waiting for Review**`
             });
 
       - name: Add merged comment
-        if: steps.extract-issue.outputs.should-comment == 'true' && steps.extract-issue.outputs.comment-type == 'merged'
+        if: steps.extract.outputs.should_comment == 'true' && steps.extract.outputs.comment_type == 'merged'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -94,6 +306,6 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.extract-issue.outputs.issue-number }},
+              issue_number: ${{ steps.extract.outputs.issue_number }},
               body: `🎉 Pull Request #${{ github.event.pull_request.number }} has been merged!\n\n✅ Issue status updated to: **Done**`
             });
