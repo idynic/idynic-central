@@ -1,0 +1,82 @@
+name: Claude Issue Implementation
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  implement-issue:
+    runs-on: ubuntu-latest
+    if: contains(github.event.comment.body, '/claude-implement')
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get issue information
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE=$(gh issue view $ISSUE_NUMBER --json title -q .title)
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_ENV
+          echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_ENV
+          BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          
+          # Comment on issue
+          gh issue comment $ISSUE_NUMBER --body "🤖 Claude has started working on this issue. Implementation in progress..."
+          
+          # Create branch
+          git checkout -b $BRANCH_NAME
+          git push -u origin $BRANCH_NAME
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Prepare prompt file
+        run: |
+          mkdir -p /tmp/claude-prompts
+          cp .github/prompts/implement-issue.txt /tmp/claude-prompts/
+          
+          # Add issue-specific context to the prompt
+          echo "Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" >> /tmp/claude-prompts/issue-context.txt
+          echo "Repository: ${{ github.repository }}" >> /tmp/claude-prompts/issue-context.txt
+          echo "Branch: ${{ env.BRANCH_NAME }}" >> /tmp/claude-prompts/issue-context.txt
+          
+          cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/implement-issue.txt > /tmp/claude-prompts/final-prompt.txt
+      
+      - name: Run Claude Code
+        uses: ./.github/actions/claude-code-action
+        with:
+          prompt_file: /tmp/claude-prompts/final-prompt.txt
+          allowed_tools: "Bash,Read,Write,Edit,Grep,mcp__github__get_issue,mcp__github__get_issue_comments"
+          install_github_mcp: "true"
+          timeout_minutes: "30"
+          anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
+          github_token: "${{ secrets.GITHUB_TOKEN }}"
+      
+      - name: Create PR
+        run: |
+          # Create test file to verify PR creation
+          echo "# Implementation for issue #${{ env.ISSUE_NUMBER }}" > implementation.md
+          
+          # Commit and push
+          git add implementation.md
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git commit -m "Implement solution for issue #${{ env.ISSUE_NUMBER }}"
+          git push -u origin ${{ env.BRANCH_NAME }}
+          
+          # Prepare PR body
+          echo "Fixes #${{ env.ISSUE_NUMBER }}" > /tmp/pr-body.md
+          echo "" >> /tmp/pr-body.md
+          echo "## Implementation by Claude Code" >> /tmp/pr-body.md
+          
+          # Create PR
+          PR_URL=$(gh pr create --title "Fix #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
+          
+          # Comment with result
+          gh issue comment ${{ env.ISSUE_NUMBER }} --body "✅ Implementation completed and PR submitted: $PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

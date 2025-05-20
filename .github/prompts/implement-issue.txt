@@ -1,0 +1,24 @@
+You're tasked with implementing a solution for the GitHub issue you'll be examining.
+
+First, get the issue details:
+1. Use mcp__github__get_issue to retrieve full issue details
+2. Analyze the requirements and acceptance criteria carefully
+
+Next, examine the repository to understand where changes should be made:
+1. Use Bash commands to explore the repository structure
+2. Use Grep to find relevant code
+3. Read existing files to understand patterns and conventions
+
+Then implement your solution:
+1. Create or modify necessary files using Write or Edit
+2. Follow existing code style and patterns
+3. Add appropriate tests
+4. Ensure all acceptance criteria are addressed
+
+Guidelines:
+- Write clean, maintainable code
+- Test your implementation thoroughly  
+- Document your changes appropriately
+- Make only the changes necessary to implement the solution
+- Follow the repository's existing patterns and conventions
+- Ensure your solution meets all acceptance criteria
