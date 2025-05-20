@@ -195,23 +195,21 @@ jobs:
           git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
           git push -u origin ${{ env.BRANCH_NAME }}
           
-          # Create PR body file with test results
-          cat > /tmp/pr-body.md << EOF
-Fixes #${{ env.ISSUE_NUMBER }}
-
-## Changes
-- Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
-- Implemented by Claude Code
-
-## Test Results
-\`\`\`
-${{ env.TEST_OUTPUT }}
-\`\`\`
-
-## Implementation Notes
-- This PR was created automatically by Claude Code
-- Please review the changes carefully
-EOF
+          # Create PR body in simpler way
+          echo "Fixes #${{ env.ISSUE_NUMBER }}" > /tmp/pr-body.md
+          echo "" >> /tmp/pr-body.md
+          echo "## Changes" >> /tmp/pr-body.md
+          echo "- Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" >> /tmp/pr-body.md
+          echo "- Implemented by Claude Code" >> /tmp/pr-body.md
+          echo "" >> /tmp/pr-body.md
+          echo "## Test Results" >> /tmp/pr-body.md
+          echo '```' >> /tmp/pr-body.md
+          echo "${{ env.TEST_OUTPUT }}" >> /tmp/pr-body.md
+          echo '```' >> /tmp/pr-body.md
+          echo "" >> /tmp/pr-body.md
+          echo "## Implementation Notes" >> /tmp/pr-body.md
+          echo "- This PR was created automatically by Claude Code" >> /tmp/pr-body.md
+          echo "- Please review the changes carefully" >> /tmp/pr-body.md
 
           # Create PR using file for body
           PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
