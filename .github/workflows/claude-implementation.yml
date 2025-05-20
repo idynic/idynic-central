@@ -196,7 +196,8 @@ jobs:
           git push -u origin ${{ env.BRANCH_NAME }}
           
           # Create PR with test results
-          PR_BODY="Fixes #${{ env.ISSUE_NUMBER }}
+          PR_BODY=$(cat <<EOF
+Fixes #${{ env.ISSUE_NUMBER }}
 
 ## Changes
 - Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
@@ -209,8 +210,10 @@ ${{ env.TEST_OUTPUT }}
 
 ## Implementation Notes
 - This PR was created automatically by Claude Code
-- Please review the changes carefully"
-
+- Please review the changes carefully
+EOF
+)
+          
           PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body "$PR_BODY" --base main)
           
           # Update project board status if applicable
