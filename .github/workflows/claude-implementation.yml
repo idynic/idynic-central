@@ -195,13 +195,20 @@ jobs:
           git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
           git push -u origin ${{ env.BRANCH_NAME }}
           
-          # Create PR with test results
-          PR_BODY=$(cat <<EOF
-Fixes #${{ env.ISSUE_NUMBER }}
+          # Create simple PR body without variable interpolation in YAML
+          CHANGES="- Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+- Implemented by Claude Code"
+          
+          NOTES="- This PR was created automatically by Claude Code
+- Please review the changes carefully"
+          
+          # Use the gh cli directly with simple strings
+          PR_URL=$(gh pr create \
+            --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" \
+            --body "Fixes #${{ env.ISSUE_NUMBER }}
 
 ## Changes
-- Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
-- Implemented by Claude Code
+$CHANGES
 
 ## Test Results
 \`\`\`
@@ -209,12 +216,8 @@ ${{ env.TEST_OUTPUT }}
 \`\`\`
 
 ## Implementation Notes
-- This PR was created automatically by Claude Code
-- Please review the changes carefully
-EOF
-)
-          
-          PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body "$PR_BODY" --base main)
+$NOTES" \
+            --base main)
           
           # Update project board status if applicable
           if [ -n "${{ env.PROJECT_ID }}" ] && [ -n "${{ env.ITEM_ID }}" ] && [ -n "${{ env.STATUS_FIELD_ID }}" ]; then
