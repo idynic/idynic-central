@@ -9,7 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.comment.body, '/claude-implement') || 
         contains(github.event.comment.body, '🚀') || 
-        contains(github.event.comment.body, '/claude-analyze-prd')
+        contains(github.event.comment.body, '/claude-analyze-prd') ||
+        contains(github.event.comment.body, '🤔')
     permissions:
       contents: write
       pull-requests: write
@@ -27,7 +28,7 @@ jobs:
           echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_ENV
           
           # Determine mode based on comment
-          if [[ "${{ github.event.comment.body }}" == *"/claude-analyze-prd"* ]]; then
+          if [[ "${{ github.event.comment.body }}" == *"/claude-analyze-prd"* ]] || [[ "${{ github.event.comment.body }}" == *"🤔"* ]]; then
             echo "MODE=analyze" >> $GITHUB_ENV
             
             # Add "analyzing" label if it exists
