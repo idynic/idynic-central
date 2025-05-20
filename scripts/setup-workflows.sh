@@ -35,7 +35,16 @@ setup_repo() {
     # Create workflows directory
     mkdir -p "$repo_path/.github/workflows"
     
-    # Copy workflow files
+    # Remove any existing symlinks
+    if [ -L "$repo_path/.github/workflows/issue-comment-commands.yml" ]; then
+        rm "$repo_path/.github/workflows/issue-comment-commands.yml"
+    fi
+    
+    if [ -L "$repo_path/.github/workflows/pr-issue-status-update.yml" ]; then
+        rm "$repo_path/.github/workflows/pr-issue-status-update.yml"
+    fi
+    
+    # Copy workflow files (as regular files, not symlinks)
     cp "$ACTIONS_REPO/issue-comment-commands-template.yml" "$repo_path/.github/workflows/issue-comment-commands.yml"
     cp "$ACTIONS_REPO/pr-issue-status-update-template.yml" "$repo_path/.github/workflows/pr-issue-status-update.yml"
     
