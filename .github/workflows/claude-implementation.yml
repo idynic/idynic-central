@@ -3,11 +3,13 @@ name: Claude Issue Implementation
 on:
   issue_comment:
     types: [created]
+  issue_reaction:
+    types: [created]
 
 jobs:
   implement-issue:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/claude-implement') || contains(github.event.comment.body, ':rocket:')
+    if: contains(github.event.comment.body, '/claude-implement') || contains(github.event.comment.body, '🚀')
     permissions:
       contents: write
       pull-requests: write
@@ -18,7 +20,7 @@ jobs:
 
       - name: Get issue information and update status
         run: |
-          # Get issue number from the comment event
+          # Get issue number from the issue comment
           ISSUE_NUMBER="${{ github.event.issue.number }}"
           
           ISSUE_TITLE=$(gh issue view $ISSUE_NUMBER --json title -q .title)
