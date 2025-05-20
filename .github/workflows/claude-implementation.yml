@@ -1,4 +1,4 @@
-name: Claude Issue Implementation
+name: Claude Issue Implementation and Task Generation
 
 on:
   issue_comment:
@@ -10,7 +10,9 @@ jobs:
     if: contains(github.event.comment.body, '/claude-implement') || 
         contains(github.event.comment.body, '🚀') || 
         contains(github.event.comment.body, '/claude-analyze-prd') ||
-        contains(github.event.comment.body, '🤔')
+        contains(github.event.comment.body, '🤔') ||
+        contains(github.event.comment.body, '/generate-tasks') ||
+        contains(github.event.comment.body, '📋')
     permissions:
       contents: write
       pull-requests: write
@@ -38,6 +40,16 @@ jobs:
             gh issue comment $ISSUE_NUMBER --body "🔍 Claude is analyzing the PRD for repository impact..."
             
             # No need to create a branch for analysis mode
+          elif [[ "${{ github.event.comment.body }}" == *"/generate-tasks"* ]] || [[ "${{ github.event.comment.body }}" == *"📋"* ]]; then
+            echo "MODE=generate-tasks" >> $GITHUB_ENV
+            
+            # Add "task-generation" label if it exists
+            gh issue edit $ISSUE_NUMBER --add-label "task-generation" || echo "Label may not exist or already applied"
+            
+            # Comment that task generation has started
+            gh issue comment $ISSUE_NUMBER --body "📋 Claude is generating tasks from this PRD..."
+            
+            # No branch needed for task generation
           else
             echo "MODE=implement" >> $GITHUB_ENV
             
@@ -81,6 +93,32 @@ jobs:
             
             # Combine files
             cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/analyze-prd.txt > /tmp/claude-prompts/final-prompt.txt
+            
+          elif [[ "${{ env.MODE }}" == "generate-tasks" ]]; then
+            # Copy task generation prompt
+            cp .github/prompts/generate-tasks.txt /tmp/claude-prompts/
+            
+            # Add issue-specific context to the prompt
+            echo "Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" >> /tmp/claude-prompts/issue-context.txt
+            echo "Repository: ${{ github.repository }}" >> /tmp/claude-prompts/issue-context.txt
+            
+            # Add repository map for context
+            echo "===== REPOSITORY MAP START =====" >> /tmp/claude-prompts/issue-context.txt
+            cat docs/REPOSITORY_MAP.md >> /tmp/claude-prompts/issue-context.txt
+            echo "===== REPOSITORY MAP END =====" >> /tmp/claude-prompts/issue-context.txt
+            
+            # Extract PRD content from issue or PR
+            echo "===== PRD CONTENT START =====" >> /tmp/claude-prompts/issue-context.txt
+            gh issue view ${{ env.ISSUE_NUMBER }} --json body -q .body >> /tmp/claude-prompts/issue-context.txt
+            echo "===== PRD CONTENT END =====" >> /tmp/claude-prompts/issue-context.txt
+            
+            # Try to extract previous repository analysis if available
+            echo "===== REPOSITORY ANALYSIS START =====" >> /tmp/claude-prompts/issue-context.txt
+            gh issue view ${{ env.ISSUE_NUMBER }} --json comments -q '.comments[] | select(.body | contains("PRD Repository Impact Analysis")) | .body' >> /tmp/claude-prompts/issue-context.txt || echo "No repository analysis found"
+            echo "===== REPOSITORY ANALYSIS END =====" >> /tmp/claude-prompts/issue-context.txt
+            
+            # Combine files
+            cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/generate-tasks.txt > /tmp/claude-prompts/final-prompt.txt
           else
             # Copy implementation prompt
             cp .github/prompts/implement-issue.txt /tmp/claude-prompts/
@@ -129,6 +167,149 @@ jobs:
             
             # Post the comment from file
             gh issue comment ${{ env.ISSUE_NUMBER }} --body-file /tmp/analysis-comment.md
+            
+          elif [[ "${{ env.MODE }}" == "generate-tasks" ]]; then
+            echo "Processing task generation results..."
+            
+            # Extract task JSON from Claude's output
+            TASK_JSON=$(grep -Pzo "(?s)<task_json>\n?\K.*?(?=\n?</task_json>)" /tmp/claude-output.md || echo "")
+            
+            if [ -z "$TASK_JSON" ]; then
+              echo "No valid task JSON found in Claude's output"
+              gh issue comment ${{ env.ISSUE_NUMBER }} --body "❌ Claude was unable to generate valid task JSON. Please check the workflow logs."
+              exit 1
+            fi
+            
+            # Save task JSON to a file
+            echo "$TASK_JSON" > /tmp/tasks.json
+            
+            # Create a summary file for reporting
+            echo "## Tasks Generated from PRD #${{ env.ISSUE_NUMBER }} 📋" > /tmp/task-summary.md
+            echo "" >> /tmp/task-summary.md
+            echo "The following tasks have been automatically created based on the PRD:" >> /tmp/task-summary.md
+            echo "" >> /tmp/task-summary.md
+            
+            # Extract summary from Claude's output (after the JSON)
+            SUMMARY=$(sed -n "/<\/task_json>/,\$p" /tmp/claude-output.md | sed '1d')
+            
+            # Process each task and create GitHub issues
+            TASK_COUNT=0
+            REPO_COUNTS="{}"
+            
+            echo "Processing tasks from JSON..."
+            jq -c '.[]' /tmp/tasks.json | while read -r task; do
+              TITLE=$(echo $task | jq -r '.title')
+              DESC=$(echo $task | jq -r '.description')
+              REPO=$(echo $task | jq -r '.repository')
+              PRIORITY=$(echo $task | jq -r '.priority')
+              ESTIMATE=$(echo $task | jq -r '.estimate')
+              DEPENDENCIES=$(echo $task | jq -r '.dependencies | join(", ")')
+              
+              echo "Processing task: $TITLE (repo: $REPO)"
+              
+              # Create the issue body with safe content
+              echo "## Task from PRD #${{ env.ISSUE_NUMBER }}" > /tmp/issue-body.md
+              echo "" >> /tmp/issue-body.md
+              echo "$DESC" >> /tmp/issue-body.md
+              echo "" >> /tmp/issue-body.md
+              echo "**Priority:** $PRIORITY" >> /tmp/issue-body.md
+              echo "**Estimate:** $ESTIMATE" >> /tmp/issue-body.md
+              if [ -n "$DEPENDENCIES" ]; then
+                echo "**Dependencies:** $DEPENDENCIES" >> /tmp/issue-body.md
+              fi
+              echo "" >> /tmp/issue-body.md
+              echo "---" >> /tmp/issue-body.md
+              echo "*This task was automatically generated from [PRD #${{ env.ISSUE_NUMBER }}](https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }})*" >> /tmp/issue-body.md
+              
+              # Create issue in target repository
+              if [[ "$REPO" == *"idynic-"* ]]; then
+                REPO_ORG="idynic"
+                REPO_NAME="${REPO}"
+              else
+                REPO_ORG="idynic"
+                REPO_NAME="idynic-${REPO}"
+              fi
+              
+              echo "Creating issue in ${REPO_ORG}/${REPO_NAME}"
+              
+              # Create the issue
+              ISSUE_URL=$(gh issue create --repo "${REPO_ORG}/${REPO_NAME}" --title "$TITLE" --body-file /tmp/issue-body.md --label "from-prd" || echo "")
+              
+              if [ -z "$ISSUE_URL" ]; then
+                echo "Failed to create issue in ${REPO_ORG}/${REPO_NAME}"
+                echo "- ⚠️ ~~$TITLE~~ (Failed to create in $REPO_NAME)" >> /tmp/task-summary.md
+                continue
+              fi
+              
+              ISSUE_NUMBER=$(echo $ISSUE_URL | grep -oP '(?<=issues/)[0-9]+$')
+              
+              echo "Issue created: $ISSUE_URL"
+              
+              # Add to project board (Project #2)
+              # Use the GraphQL API to add the issue to the project
+              PROJECT_NUMBER=2
+              
+              # First, we need the project ID
+              PROJECT_ID=$(gh api graphql -f query='
+                query($org: String!, $number: Int!) {
+                  organization(login: $org) {
+                    projectV2(number: $number) {
+                      id
+                    }
+                  }
+                }' -f org="${REPO_ORG}" -f number=$PROJECT_NUMBER -q '.data.organization.projectV2.id' || echo "")
+              
+              if [ -n "$PROJECT_ID" ]; then
+                echo "Adding issue to project board..."
+                
+                # Get the node ID of the issue
+                ISSUE_NODE_ID=$(gh api repos/${REPO_ORG}/${REPO_NAME}/issues/${ISSUE_NUMBER} --jq .node_id)
+                
+                # Add the issue to the project
+                gh api graphql -f query='
+                  mutation($project:ID!, $item:ID!) {
+                    addProjectV2ItemById(input: {projectId: $project, contentId: $item}) {
+                      item {
+                        id
+                      }
+                    }
+                  }' -f project="$PROJECT_ID" -f item="$ISSUE_NODE_ID" > /dev/null || echo "Failed to add to project"
+              else
+                echo "Could not find project #$PROJECT_NUMBER for organization $REPO_ORG"
+              fi
+              
+              # Add priority label if available
+              if [ -n "$PRIORITY" ]; then
+                gh issue edit "$ISSUE_URL" --add-label "priority:$PRIORITY" || echo "Priority label not found"
+              fi
+              
+              # Add to summary
+              echo "- [[$TITLE]]($ISSUE_URL) (in $REPO_NAME, Priority: $PRIORITY, Estimate: $ESTIMATE)" >> /tmp/task-summary.md
+              
+              # Increment task count
+              TASK_COUNT=$((TASK_COUNT + 1))
+              
+              # Update repo counts
+              REPO_COUNTS=$(echo $REPO_COUNTS | jq --arg repo "$REPO_NAME" '. + {($repo): (.[($repo)] // 0) + 1}')
+            done
+            
+            # Add summary information
+            echo "" >> /tmp/task-summary.md
+            echo "## Summary" >> /tmp/task-summary.md
+            echo "" >> /tmp/task-summary.md
+            echo "**Total tasks created:** $TASK_COUNT" >> /tmp/task-summary.md
+            echo "" >> /tmp/task-summary.md
+            
+            # Add Claude's summary if available
+            if [ -n "$SUMMARY" ]; then
+              echo "## Claude's Task Analysis" >> /tmp/task-summary.md
+              echo "" >> /tmp/task-summary.md
+              echo "$SUMMARY" >> /tmp/task-summary.md
+            fi
+            
+            # Post the summary as a comment
+            gh issue comment ${{ env.ISSUE_NUMBER }} --body-file /tmp/task-summary.md
+            echo "Task generation completed successfully"
             
           else
             # Implementation mode - create PR with code changes
