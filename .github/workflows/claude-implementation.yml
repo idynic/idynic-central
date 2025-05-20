@@ -3,8 +3,6 @@ name: Claude Issue Implementation
 on:
   issue_comment:
     types: [created]
-  issue_reaction:
-    types: [created]
 
 jobs:
   implement-issue:
@@ -36,7 +34,7 @@ jobs:
             
             # Get item ID using GraphQL
             ITEM_ID=$(gh api graphql -f query='
-              query($org: String!) {
+              query($org: String\!) {
                 organization(login: $org) {
                   projectV2(number: ${{ secrets.PROJECT_ID }}) {
                     items(first: 100) {
@@ -70,7 +68,7 @@ jobs:
               
               # Get status field ID
               STATUS_FIELD=$(gh api graphql -f query='
-                query($org: String!) {
+                query($org: String\!) {
                   organization(login: $org) {
                     projectV2(number: ${{ secrets.PROJECT_ID }}) {
                       field(name: "Status") {
@@ -98,7 +96,7 @@ jobs:
                 
                 # Update status
                 gh api graphql -f query='
-                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  mutation($projectId: ID\!, $itemId: ID\!, $fieldId: ID\!, $optionId: String\!) {
                     updateProjectV2ItemFieldValue(input: {
                       projectId: $projectId
                       itemId: $itemId
@@ -111,7 +109,7 @@ jobs:
                         id
                       }
                     }
-                  }' -f projectId="$(gh api graphql -f query='query($org: String!) {organization(login: $org) {projectV2(number: ${{ secrets.PROJECT_ID }}) {id}}}' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.id')" \
+                  }' -f projectId="$(gh api graphql -f query='query($org: String\!) {organization(login: $org) {projectV2(number: ${{ secrets.PROJECT_ID }}) {id}}}' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.id')" \
                      -f itemId="$ITEM_ID" \
                      -f fieldId="$STATUS_FIELD_ID" \
                      -f optionId="$IN_PROGRESS_ID"
@@ -172,7 +170,7 @@ jobs:
           fi
           
           # If there are uncommitted changes, commit them
-          if [[ ! -z "$UNCOMMITTED_CHANGES" ]]; then
+          if [[ \! -z "$UNCOMMITTED_CHANGES" ]]; then
             echo "Committing changes made by Claude..."
             git add .
             git config user.name "GitHub Actions"
@@ -205,7 +203,7 @@ jobs:
             
             # Get status field and Review option ID
             STATUS_FIELD=$(gh api graphql -f query='
-              query($org: String!) {
+              query($org: String\!) {
                 organization(login: $org) {
                   projectV2(number: ${{ secrets.PROJECT_ID }}) {
                     field(name: "Status") {
@@ -227,7 +225,7 @@ jobs:
             if [ -n "$REVIEW_ID" ]; then
               # Get project ID
               PROJECT_ID=$(gh api graphql -f query='
-                query($org: String!) {
+                query($org: String\!) {
                   organization(login: $org) {
                     projectV2(number: ${{ secrets.PROJECT_ID }}) {
                       id
@@ -237,7 +235,7 @@ jobs:
               
               # Update status to "Review"
               gh api graphql -f query='
-                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                mutation($projectId: ID\!, $itemId: ID\!, $fieldId: ID\!, $optionId: String\!) {
                   updateProjectV2ItemFieldValue(input: {
                     projectId: $projectId
                     itemId: $itemId
