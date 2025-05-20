@@ -263,7 +263,7 @@ jobs:
                       id
                     }
                   }
-                }' -f org="${REPO_ORG}" -f number=$PROJECT_NUMBER -q '.data.organization.projectV2.id' || echo "")
+                }' -f org="${REPO_ORG}" -f number="$PROJECT_NUMBER" -q '.data.organization.projectV2.id' || echo "")
               
               if [ -n "$PROJECT_ID" ]; then
                 echo "Adding issue to project board..."
@@ -296,7 +296,7 @@ jobs:
               TASK_COUNT=$((TASK_COUNT + 1))
               
               # Update repo counts
-              REPO_COUNTS=$(echo $REPO_COUNTS | jq --arg repo "$REPO_NAME" '. + {($repo): (.[($repo)] // 0) + 1}')
+              REPO_COUNTS=$(echo $REPO_COUNTS | jq --arg repo "$REPO_NAME" '.[$repo] = (.[$repo] // 0) + 1')
             done
             
             # Add summary information

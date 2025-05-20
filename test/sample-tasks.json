@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Test Task 1",
+    "description": "This is a test task to verify the workflow",
+    "repository": "idynic-central",
+    "priority": "medium",
+    "estimate": "small",
+    "dependencies": []
+  },
+  {
+    "title": "Test Task 2",
+    "description": "This is another test task with a dependency",
+    "repository": "idynic-central",
+    "priority": "high",
+    "estimate": "medium",
+    "dependencies": ["Test Task 1"]
+  }
+]
