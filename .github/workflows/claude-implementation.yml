@@ -3,11 +3,15 @@ name: Claude Issue Implementation
 on:
   issue_comment:
     types: [created]
+  issue_reaction:
+    types: [created]
 
 jobs:
   implement-issue:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/claude-implement')
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude-implement')) || 
+      (github.event_name == 'issue_reaction' && github.event.reaction.content == 'rocket')
     permissions:
       contents: write
       pull-requests: write
@@ -18,7 +22,16 @@ jobs:
 
       - name: Get issue information and update status
         run: |
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          # Get issue number based on event type
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          elif [[ "${{ github.event_name }}" == "issue_reaction" ]]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          else
+            echo "Unsupported event type: ${{ github.event_name }}"
+            exit 1
+          fi
+          
           ISSUE_TITLE=$(gh issue view $ISSUE_NUMBER --json title -q .title)
           echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_ENV
           echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_ENV
@@ -154,19 +167,30 @@ jobs:
       
       - name: Create PR and update status
         run: |
-          # Check if any changes were made
-          if [[ -z $(git status -s) ]]; then
+          # Fetch the latest changes
+          git fetch origin
+          
+          # Check if any changes were made (either uncommitted or committed)
+          UNCOMMITTED_CHANGES=$(git status -s)
+          COMMITTED_CHANGES=$(git log --format=%H -n 1 origin/main..${{ env.BRANCH_NAME }} 2>/dev/null || echo "")
+          
+          if [[ -z "$UNCOMMITTED_CHANGES" ]] && [[ -z "$COMMITTED_CHANGES" ]]; then
             echo "No changes were made by Claude."
             gh issue comment ${{ env.ISSUE_NUMBER }} --body "❌ Claude was unable to implement a solution for this issue. No changes were made."
             exit 1
           fi
           
-          # Commit and push changes
-          git add .
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
-          git push -u origin ${{ env.BRANCH_NAME }}
+          # If there are uncommitted changes, commit them
+          if [[ ! -z "$UNCOMMITTED_CHANGES" ]]; then
+            echo "Committing changes made by Claude..."
+            git add .
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
+            git push -u origin ${{ env.BRANCH_NAME }}
+          else
+            echo "Changes were already committed by Claude."
+          fi
           
           # Create PR body file
           cat > /tmp/pr-body.md << EOF

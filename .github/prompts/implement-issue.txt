@@ -12,7 +12,7 @@ Next, examine the repository to understand where changes should be made:
 Then implement your solution:
 1. Create or modify necessary files using Write or Edit
 2. Follow existing code style and patterns
-3. Add appropriate tests
+3. Add appropriate tests if needed
 4. Ensure all acceptance criteria are addressed
 
 Guidelines:
@@ -22,3 +22,5 @@ Guidelines:
 - Make only the changes necessary to implement the solution
 - Follow the repository's existing patterns and conventions
 - Ensure your solution meets all acceptance criteria
+- IMPORTANT: Do not commit any changes - the GitHub Actions workflow will handle commits and PRs
+- Just create or modify the necessary files but do not run git commands to commit them
