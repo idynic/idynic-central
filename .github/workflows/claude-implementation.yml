@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get issue information
+      - name: Get issue information and update status
         run: |
           # Get issue number from the comment
           ISSUE_NUMBER="${{ github.event.issue.number }}"
@@ -26,6 +26,9 @@ jobs:
           
           # Add "in-progress" label if it exists
           gh issue edit $ISSUE_NUMBER --add-label "in-progress" || echo "Label may not exist or already applied"
+          
+          # Comment that work has started
+          gh issue comment $ISSUE_NUMBER --body "🤖 Claude has started working on this issue. Implementation in progress..."
           
           # Create and switch to implementation branch
           BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
@@ -47,12 +50,6 @@ jobs:
           
           cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/implement-issue.txt > /tmp/claude-prompts/final-prompt.txt
       
-      - name: Notify Issue
-        run: |
-          gh issue comment ${{ env.ISSUE_NUMBER }} --body "🤖 Claude has started working on this issue. Implementation in progress..."
-        env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
-          
       - name: Run Claude Code
         uses: ./.github/actions/claude-code-action
         with:
@@ -63,7 +60,7 @@ jobs:
           anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
           github_token: "${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}"
       
-      - name: Create PR
+      - name: Create PR and update status
         run: |
           # Fetch the latest changes
           git fetch origin
