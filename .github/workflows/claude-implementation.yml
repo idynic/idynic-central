@@ -7,8 +7,13 @@ on:
 jobs:
   implement-issue:
     runs-on: ubuntu-latest
-    # EMERGENCY DISABLED TO STOP LOOP
-    if: false
+    # Only trigger when specific commands are received (not workflow comments)
+    if: (contains(github.event.comment.body, '/claude-implement') || 
+        contains(github.event.comment.body, '🚀') || 
+        contains(github.event.comment.body, '/claude-analyze-prd') || 
+        contains(github.event.comment.body, '🤔') || 
+        contains(github.event.comment.body, '/generate-tasks')) && 
+        github.event.sender.type == 'User'
     permissions:
       contents: write
       pull-requests: write
@@ -42,8 +47,8 @@ jobs:
             # Add "task-generation" label if it exists
             gh issue edit $ISSUE_NUMBER --add-label "task-generation" || echo "Label may not exist or already applied"
             
-            # Comment that task generation has started
-            gh issue comment $ISSUE_NUMBER --body "📋 Claude is generating tasks from this PRD..."
+            # Comment that task generation has started (using text, not emoji to avoid recursive triggers)
+            gh issue comment $ISSUE_NUMBER --body "Claude is now generating tasks from this PRD..."
             
             # No branch needed for task generation
           else
