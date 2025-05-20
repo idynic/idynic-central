@@ -7,12 +7,13 @@ on:
 jobs:
   implement-issue:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/claude-implement') || 
+    if: (contains(github.event.comment.body, '/claude-implement') || 
         contains(github.event.comment.body, '🚀') || 
         contains(github.event.comment.body, '/claude-analyze-prd') ||
         contains(github.event.comment.body, '🤔') || 
         contains(github.event.comment.body, '/generate-tasks') ||
-        contains(github.event.comment.body, '📋')
+        contains(github.event.comment.body, '📋')) && 
+        github.event.sender.login != 'github-actions[bot]'
     permissions:
       contents: write
       pull-requests: write
