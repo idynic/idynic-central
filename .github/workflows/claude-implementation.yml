@@ -56,7 +56,7 @@ jobs:
                     }
                   }
                 }
-              }' -f org="idynic" -f number=$ISSUE_NUMBER --jq '.data.organization.projectV2.items.nodes[] | select(.content.number == '$ISSUE_NUMBER') | .id')
+              }' -f org="idynic" -f number=$ISSUE_NUMBER --jq '.data.organization.projectV2.items.nodes[] | select(.content.number == '"$ISSUE_NUMBER"') | .id')
             
             if [ -z "$ITEM_ID" ]; then
               echo "Issue #$ISSUE_NUMBER not found in project board"
@@ -194,7 +194,7 @@ jobs:
                     }
                   }
                 }
-              }' -f org="idynic" -f number="${{ env.ISSUE_NUMBER }}" --jq '.data.organization.projectV2.items.nodes[] | select(.content.number == ${{ env.ISSUE_NUMBER }}) | .id')
+              }' -f org="idynic" -f number="${{ env.ISSUE_NUMBER }}" --jq '.data.organization.projectV2.items.nodes[] | select(.content.number == '"${{ env.ISSUE_NUMBER }}"') | .id')
             
             if [ -n "$ITEM_ID" ]; then
               # Get status field and in review option
