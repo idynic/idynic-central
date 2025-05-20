@@ -1,0 +1,7 @@
+# Claude output files
+output.txt
+output.json
+/tmp/claude-*
+claude-output.md
+.claude/
+EOF < /dev/null
