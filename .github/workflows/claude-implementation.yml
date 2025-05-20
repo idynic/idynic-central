@@ -26,18 +26,15 @@ jobs:
           # Add "in_progress" label to issue if it exists
           gh issue edit $ISSUE_NUMBER --add-label "in_progress" || echo "Label may not exist or already applied"
           
-          # Get project information and update status
-          PROJECT_ID=${{ secrets.PROJECT_ID }}
-          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
-          
-          if [ -n "$PROJECT_ID" ]; then
+          # Update project board status
+          if [ -n "${{ secrets.PROJECT_ID }}" ]; then
             echo "Updating project board status..."
             
-            # Get the item ID for this issue in the project
-            PROJECT_QUERY_RESULT=$(gh api graphql -f query='
-              query($org: String!, $project: Int!, $issue: Int!) {
+            # Get item ID using GraphQL
+            ITEM_ID=$(gh api graphql -f query='
+              query($org: String!, $number: Int!) {
                 organization(login: $org) {
-                  projectV2(number: $project) {
+                  projectV2(number: ${{ secrets.PROJECT_ID }}) {
                     items(first: 100) {
                       nodes {
                         id
@@ -48,11 +45,33 @@ jobs:
                         }
                       }
                     }
-                    fields(first: 100) {
-                      nodes {
-                        ... on ProjectV2SingleSelectField {
+                    field(name: "Status") {
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        options {
                           id
                           name
+                        }
+                      }
+                    }
+                  }
+                }
+              }' -f org="${{ github.repository_owner }}" -f number=$ISSUE_NUMBER --jq '.data.organization.projectV2.items.nodes[] | select(.content.number == '"$ISSUE_NUMBER"') | .id')
+            
+            if [ -z "$ITEM_ID" ]; then
+              echo "Issue #$ISSUE_NUMBER not found in project board"
+            else
+              echo "Found issue in project with item ID: $ITEM_ID"
+              echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
+              
+              # Get status field ID
+              STATUS_FIELD=$(gh api graphql -f query='
+                query($org: String!) {
+                  organization(login: $org) {
+                    projectV2(number: ${{ secrets.PROJECT_ID }}) {
+                      field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                          id
                           options {
                             id
                             name
@@ -61,50 +80,39 @@ jobs:
                       }
                     }
                   }
-                }
-              }' -f org="${{ github.repository_owner }}" -f project="$PROJECT_ID" -f issue="$ISSUE_NUMBER")
-            
-            # Parse the response to extract IDs
-            ITEM_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.items.nodes[] | select(.content.number == '$ISSUE_NUMBER') | .id')
-            
-            if [ -z "$ITEM_ID" ]; then
-              echo "Issue not found in project board"
-            else
-              echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
+                }' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.field')
               
-              # Find Status field and In Progress option
-              STATUS_FIELD_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.fields.nodes[] | select(.name == "Status") | .id')
+              STATUS_FIELD_ID=$(echo "$STATUS_FIELD" | jq -r '.id')
+              echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
+              IN_PROGRESS_OPTION=$(echo "$STATUS_FIELD" | jq -r '.options[] | select(.name == "In Progress")')
+              IN_PROGRESS_ID=$(echo "$IN_PROGRESS_OPTION" | jq -r '.id')
               
-              if [ -z "$STATUS_FIELD_ID" ]; then
-                echo "Status field not found in project board"
+              if [ -z "$IN_PROGRESS_ID" ]; then
+                echo "Could not find 'In Progress' status option"
               else
-                echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
+                echo "Setting status to 'In Progress'"
                 
-                # Find the In Progress option ID
-                IN_PROGRESS_OPTION_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == "In progress") | .id')
-                
-                if [ -z "$IN_PROGRESS_OPTION_ID" ]; then
-                  echo "In progress status option not found in project board"
-                else
-                  # Update status to "In Progress"
-                  gh api graphql -f query='
-                    mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
-                      updateProjectV2ItemFieldValue(input: {
-                        projectId: $project
-                        itemId: $item
-                        fieldId: $field
-                        value: { 
-                          singleSelectOptionId: $value
-                        }
-                      }) {
-                        projectV2Item {
-                          id
-                        }
+                # Update status
+                gh api graphql -f query='
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId
+                      itemId: $itemId
+                      fieldId: $fieldId
+                      value: { 
+                        singleSelectOptionId: $optionId
                       }
-                    }' -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$STATUS_FIELD_ID" -f value="$IN_PROGRESS_OPTION_ID"
-                  
-                  echo "Updated issue status to In Progress in project board"
-                fi
+                    }) {
+                      projectV2Item {
+                        id
+                      }
+                    }
+                  }' -f projectId="$(gh api graphql -f query='query($org: String!) {organization(login: $org) {projectV2(number: ${{ secrets.PROJECT_ID }}) {id}}}' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.id')" \
+                     -f itemId="$ITEM_ID" \
+                     -f fieldId="$STATUS_FIELD_ID" \
+                     -f optionId="$IN_PROGRESS_ID"
+                
+                echo "Project board status updated to 'In Progress'"
               fi
             fi
           else
@@ -120,7 +128,7 @@ jobs:
           git checkout -b $BRANCH_NAME
           git push -u origin $BRANCH_NAME
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
           
       - name: Prepare prompt file
         run: |
@@ -142,7 +150,7 @@ jobs:
           install_github_mcp: "true"
           timeout_minutes: "30"
           anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
-          github_token: "${{ secrets.GITHUB_TOKEN }}"
+          github_token: "${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}"
       
       - name: Create PR and update status
         run: |
@@ -173,20 +181,21 @@ jobs:
           - Please review the changes carefully
           EOF
           
-          # Create PR using PROJECT_TOKEN instead of GITHUB_TOKEN
+          # Create PR using PROJECT_TOKEN
           PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
           
-          # Update project board status if applicable
-          if [ -n "${{ env.PROJECT_ID }}" ] && [ -n "${{ env.ITEM_ID }}" ] && [ -n "${{ env.STATUS_FIELD_ID }}" ]; then
-            echo "Updating project board status to Review..."
+          # Update project board status to "Review" if project board integration is enabled
+          if [ -n "${{ secrets.PROJECT_ID }}" ] && [ -n "${{ env.ITEM_ID }}" ] && [ -n "${{ env.STATUS_FIELD_ID }}" ]; then
+            echo "Updating project board status to 'Review'..."
             
-            # Get Review status option ID
-            REVIEW_OPTION_ID=$(gh api graphql -f query='
-              query($org: String!, $project: Int!, $fieldId: ID!) {
+            # Get status field and Review option ID
+            STATUS_FIELD=$(gh api graphql -f query='
+              query($org: String!) {
                 organization(login: $org) {
-                  projectV2(number: $project) {
-                    field(id: $fieldId) {
+                  projectV2(number: ${{ secrets.PROJECT_ID }}) {
+                    field(name: "Status") {
                       ... on ProjectV2SingleSelectField {
+                        id
                         options {
                           id
                           name
@@ -195,38 +204,50 @@ jobs:
                     }
                   }
                 }
-              }' -f org="${{ github.repository_owner }}" -f project="${{ env.PROJECT_ID }}" -f fieldId="${{ env.STATUS_FIELD_ID }}" | 
-              jq -r '.data.organization.projectV2.field.options[] | select(.name == "Review") | .id' | head -1)
+              }' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.field')
             
-            if [ -n "$REVIEW_OPTION_ID" ]; then
+            REVIEW_OPTION=$(echo "$STATUS_FIELD" | jq -r '.options[] | select(.name == "Review")')
+            REVIEW_ID=$(echo "$REVIEW_OPTION" | jq -r '.id')
+            
+            if [ -n "$REVIEW_ID" ]; then
+              # Get project ID
+              PROJECT_ID=$(gh api graphql -f query='
+                query($org: String!) {
+                  organization(login: $org) {
+                    projectV2(number: ${{ secrets.PROJECT_ID }}) {
+                      id
+                    }
+                  }
+                }' -f org="${{ github.repository_owner }}" --jq '.data.organization.projectV2.id')
+              
               # Update status to "Review"
               gh api graphql -f query='
-                mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                   updateProjectV2ItemFieldValue(input: {
-                    projectId: $project
-                    itemId: $item
-                    fieldId: $field
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
                     value: { 
-                      singleSelectOptionId: $value
+                      singleSelectOptionId: $optionId
                     }
                   }) {
                     projectV2Item {
                       id
                     }
                   }
-                }' -f project="${{ env.PROJECT_ID }}" -f item="${{ env.ITEM_ID }}" -f field="${{ env.STATUS_FIELD_ID }}" -f value="$REVIEW_OPTION_ID"
+                }' -f projectId="$PROJECT_ID" -f itemId="${{ env.ITEM_ID }}" -f fieldId="${{ env.STATUS_FIELD_ID }}" -f optionId="$REVIEW_ID"
               
-              echo "Updated issue status to Review in project board"
+              echo "Project board status updated to 'Review'"
               STATUS_UPDATE=", and status updated to Review"
             else
-              echo "Review status option not found in project board"
+              echo "Could not find 'Review' status option in project board"
               STATUS_UPDATE=""
             fi
           else
             STATUS_UPDATE=""
           fi
           
-          # Add comment to issue
+          # Comment with result
           gh issue comment ${{ env.ISSUE_NUMBER }} --body "✅ Implementation completed and PR submitted: $PR_URL$STATUS_UPDATE"
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
