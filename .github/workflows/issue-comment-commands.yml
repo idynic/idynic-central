@@ -1,0 +1,19 @@
+name: Issue Comment Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  # Handle /start command
+  handle-start-command:
+    if: |
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '/start')
+    uses: idynic/idynic-github-actions/.github/workflows/issue-commands-reusable.yml@main
+    with:
+      command_name: 'start'
+      issue_number: ${{ github.event.issue.number }}
+    secrets:
+      github_token: ${{ secrets.GITHUB_TOKEN }}
+      project_token: ${{ secrets.PROJECT_TOKEN }}

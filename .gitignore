@@ -4,4 +4,18 @@ output.json
 /tmp/claude-*
 claude-output.md
 .claude/
-EOF < /dev/null
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
+*.env
+*.log
