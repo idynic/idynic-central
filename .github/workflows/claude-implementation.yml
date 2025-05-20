@@ -6,7 +6,6 @@ on:
 
 jobs:
   implement-issue:
-    name: Implement issue with Claude
     runs-on: ubuntu-latest
     if: contains(github.event.comment.body, '/claude-implement')
     permissions:
@@ -20,36 +19,116 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Comment on issue
+      - name: Get issue information
+        id: issue_info
         run: |
-          gh issue comment ${{ github.event.issue.number }} --body "🤖 Claude starting work..."
+          ISSUE_NUMBER=${{ github.event.issue.number }}
+          ISSUE_TITLE=$(gh issue view $ISSUE_NUMBER --json title -q .title)
+          echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_ENV
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_ENV
+          BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          
+          # Comment that work has started
+          gh issue comment $ISSUE_NUMBER --body "🤖 Claude has started working on this issue. Implementation in progress..."
+          
+          # Create and switch to implementation branch
+          git checkout -b $BRANCH_NAME
+          git push -u origin $BRANCH_NAME
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Create branch
+      - name: Setup Claude Code Environment
         run: |
-          ISSUE_NUMBER=${{ github.event.issue.number }}
-          BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
-          git checkout -b $BRANCH_NAME
+          # Install Claude Code CLI
+          npm install -g @anthropic-ai/claude-code
           
-          # Create a test file
-          echo "# Test implementation for issue #${ISSUE_NUMBER}" > test-implementation.md
+          # Setup Claude for GitHub
+          cat > /tmp/claude_prompt.txt << 'EOF'
+          You're tasked with implementing a solution for GitHub issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+
+          Please:
+          1. Analyze the issue requirements carefully
+          2. Explore the repository to understand relevant code
+          3. Implement a solution that addresses all requirements
+          4. Follow existing code style and patterns
+          5. Test your changes thoroughly
+          6. Make only the changes necessary to implement the solution
+          EOF
+      
+      - name: Run Claude Code
+        run: |
+          # Run Claude Code with the prompt
+          claude --api-key "${{ secrets.ANTHROPIC_API_KEY }}" \
+            --prompt "$(cat /tmp/claude_prompt.txt)" \
+            --allowed-tools "Bash,Read,Write,Edit,Grep"
+        continue-on-error: true
+      
+      - name: Run tests
+        id: run_tests
+        continue-on-error: true
+        run: |
+          # Repository-specific test command detection
+          if [ -f "Makefile" ] && grep -q "test:" Makefile; then
+            echo "Running tests with make test..."
+            TEST_OUTPUT=$(make test 2>&1) || true
+          elif [ -f "package.json" ] && grep -q "\"test\":" package.json; then
+            echo "Running tests with npm test..."
+            TEST_OUTPUT=$(npm test 2>&1) || true
+          elif [ -f "go.mod" ]; then
+            echo "Running tests with go test..."
+            TEST_OUTPUT=$(go test ./... 2>&1) || true
+          elif [ -f "requirements.txt" ] || [ -f "setup.py" ]; then
+            echo "Running tests with pytest..."
+            TEST_OUTPUT=$(python -m pytest 2>&1) || true
+          else
+            echo "No test command detected."
+            TEST_OUTPUT="No tests run - couldn't determine appropriate test command."
+          fi
           
-          # Commit and push
+          # Save test output
+          echo "TEST_OUTPUT<<EOF" >> $GITHUB_ENV
+          echo "$TEST_OUTPUT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+      
+      - name: Create PR
+        run: |
+          # Check if any changes were made
+          if [[ -z $(git status -s) ]]; then
+            echo "No changes were made by Claude."
+            gh issue comment ${{ env.ISSUE_NUMBER }} --body "❌ Claude was unable to implement a solution for this issue. No changes were made."
+            exit 0
+          fi
+          
+          # Commit and push changes
+          git add .
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add test-implementation.md
-          git commit -m "Test implementation for issue #${ISSUE_NUMBER}"
-          git push -u origin $BRANCH_NAME
+          git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
+          git push
+          
+          # Create PR body file
+          cat > /tmp/pr-body.md << EOF
+          Fixes #${{ env.ISSUE_NUMBER }}
+
+          ## Changes
+          - Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+          - Implemented by Claude Code
+
+          ## Test Results
+          \`\`\`
+          ${{ env.TEST_OUTPUT }}
+          \`\`\`
+
+          ## Implementation Notes
+          - This PR was created automatically by Claude Code
+          - Please review the changes carefully
+          EOF
           
           # Create PR
-          PR_URL=$(gh pr create --title "Test Fix for issue #${ISSUE_NUMBER}" --body "Fixes #${ISSUE_NUMBER}
-
-This is a test PR implementation to validate GitHub Actions workflow.
-
-Generated by GitHub Actions." --base main)
+          PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
           
-          # Comment with success
-          gh issue comment ${ISSUE_NUMBER} --body "✅ Created test PR: ${PR_URL}"
+          # Comment success
+          gh issue comment ${{ env.ISSUE_NUMBER }} --body "✅ Implementation completed and PR submitted: $PR_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
