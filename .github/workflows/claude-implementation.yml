@@ -3,7 +3,7 @@ name: Claude Issue Implementation
 on:
   issue_comment:
     types: [created]
-  issue_reaction:
+  reaction_added:
     types: [created]
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude-implement')) || 
-      (github.event_name == 'issue_reaction' && github.event.reaction.content == 'rocket')
+      (github.event_name == 'reaction_added' && github.event.reaction.content == 'rocket' && github.event.issue)
     permissions:
       contents: write
       pull-requests: write
@@ -25,7 +25,7 @@ jobs:
           # Get issue number based on event type
           if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
             ISSUE_NUMBER="${{ github.event.issue.number }}"
-          elif [[ "${{ github.event_name }}" == "issue_reaction" ]]; then
+          elif [[ "${{ github.event_name }}" == "reaction_added" ]]; then
             ISSUE_NUMBER="${{ github.event.issue.number }}"
           else
             echo "Unsupported event type: ${{ github.event_name }}"
