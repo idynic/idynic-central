@@ -207,19 +207,19 @@ jobs:
               
               echo "Processing task: $TITLE (repo: $REPO)"
               
-              # Create the issue body
-              cat > /tmp/issue-body.md << EOF
-## Task from PRD #${{ env.ISSUE_NUMBER }}
-
-$DESC
-
-**Priority:** $PRIORITY
-**Estimate:** $ESTIMATE
-$([ -n "$DEPENDENCIES" ] && echo "**Dependencies:** $DEPENDENCIES" || echo "")
-
----
-*This task was automatically generated from [PRD #${{ env.ISSUE_NUMBER }}](https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }})*
-EOF
+              # Create the issue body with safe content
+              echo "## Task from PRD #${{ env.ISSUE_NUMBER }}" > /tmp/issue-body.md
+              echo "" >> /tmp/issue-body.md
+              echo "$DESC" >> /tmp/issue-body.md
+              echo "" >> /tmp/issue-body.md
+              echo "**Priority:** $PRIORITY" >> /tmp/issue-body.md
+              echo "**Estimate:** $ESTIMATE" >> /tmp/issue-body.md
+              if [ -n "$DEPENDENCIES" ]; then
+                echo "**Dependencies:** $DEPENDENCIES" >> /tmp/issue-body.md
+              fi
+              echo "" >> /tmp/issue-body.md
+              echo "---" >> /tmp/issue-body.md
+              echo "*This task was automatically generated from [PRD #${{ env.ISSUE_NUMBER }}](https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }})*" >> /tmp/issue-body.md
               
               # Create issue in target repository
               if [[ "$REPO" == *"idynic-"* ]]; then
