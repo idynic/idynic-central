@@ -51,12 +51,13 @@ jobs:
           cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/implement-issue.txt > /tmp/claude-prompts/final-prompt.txt
       
       - name: Run Claude Code
+        timeout-minutes: 12  # Set a 12-minute timeout on the entire step
         uses: ./.github/actions/claude-code-action
         with:
           prompt_file: /tmp/claude-prompts/final-prompt.txt
           allowed_tools: "Bash,Read,Write,Edit,Grep,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__search_repositories"
           install_github_mcp: "true"
-          timeout_minutes: "30"
+          timeout_minutes: "10"  # Also reduce the Claude-internal timeout to 10 minutes
           anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
           github_token: "${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}"
       
