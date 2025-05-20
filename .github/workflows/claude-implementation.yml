@@ -7,12 +7,13 @@ on:
 jobs:
   implement-issue:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/claude-implement') || 
+    if: (contains(github.event.comment.body, '/claude-implement') || 
         contains(github.event.comment.body, '🚀') || 
         contains(github.event.comment.body, '/claude-analyze-prd') ||
-        contains(github.event.comment.body, '🤔') ||
+        contains(github.event.comment.body, '🤔') || 
         contains(github.event.comment.body, '/generate-tasks') ||
-        contains(github.event.comment.body, '📋')
+        contains(github.event.comment.body, '📋')) && 
+        github.actor != 'github-actions[bot]'
     permissions:
       contents: write
       pull-requests: write
@@ -69,6 +70,8 @@ jobs:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
           
       - name: Prepare prompt file
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p /tmp/claude-prompts
           
