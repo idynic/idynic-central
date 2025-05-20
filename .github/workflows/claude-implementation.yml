@@ -256,6 +256,7 @@ jobs:
               PROJECT_NUMBER=2
               
               # First, we need the project ID
+              # Project number needs special formatting for GraphQL as Int!
               PROJECT_ID=$(gh api graphql -f query='
                 query($org: String!, $number: Int!) {
                   organization(login: $org) {
@@ -263,7 +264,7 @@ jobs:
                       id
                     }
                   }
-                }' -f org="${REPO_ORG}" -f "number=${PROJECT_NUMBER}" -q '.data.organization.projectV2.id' || echo "")
+                }' -f org="${REPO_ORG}" -f "number=2" -q '.data.organization.projectV2.id' || echo "")
               
               if [ -n "$PROJECT_ID" ]; then
                 echo "Adding issue to project board..."
