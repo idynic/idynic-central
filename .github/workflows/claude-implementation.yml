@@ -6,267 +6,50 @@ on:
 
 jobs:
   implement-issue:
-    if: contains(github.event.comment.body, '/claude-implement')
+    name: Implement issue with Claude
     runs-on: ubuntu-latest
+    if: contains(github.event.comment.body, '/claude-implement')
     permissions:
       contents: write
       pull-requests: write
       issues: write
-      project: write
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Get issue information and update status
-        id: issue_info
+      - name: Comment on issue
         run: |
-          ISSUE_NUMBER=${{ github.event.issue.number }}
-          
-          # Get issue details
-          ISSUE_TITLE=$(gh issue view $ISSUE_NUMBER --json title -q .title)
-          echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_ENV
-          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_ENV
-          
-          # Add "in_progress" label to issue if it exists
-          gh issue edit $ISSUE_NUMBER --add-label "in_progress" || echo "Label may not exist or already applied"
-          
-          # Get project information and update status
-          PROJECT_ID=${{ secrets.PROJECT_ID }}
-          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
-          
-          if [ -n "$PROJECT_ID" ]; then
-            echo "Updating project board status..."
-            
-            # Get the item ID for this issue in the project
-            PROJECT_QUERY_RESULT=$(gh api graphql -f query='
-              query($org: String!, $project: Int!, $issue: Int!) {
-                organization(login: $org) {
-                  projectV2(number: $project) {
-                    items(first: 100) {
-                      nodes {
-                        id
-                        content {
-                          ... on Issue {
-                            number
-                          }
-                        }
-                      }
-                    }
-                    fields(first: 100) {
-                      nodes {
-                        ... on ProjectV2SingleSelectField {
-                          id
-                          name
-                          options {
-                            id
-                            name
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }' -f org="${{ github.repository_owner }}" -f project="$PROJECT_ID" -f issue="$ISSUE_NUMBER")
-            
-            # Parse the response to extract IDs
-            ITEM_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.items.nodes[] | select(.content.number == '$ISSUE_NUMBER') | .id')
-            
-            if [ -z "$ITEM_ID" ]; then
-              echo "Issue not found in project board"
-            else
-              echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
-              
-              # Find Status field and In Progress option
-              STATUS_FIELD_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.fields.nodes[] | select(.name == "Status") | .id')
-              
-              if [ -z "$STATUS_FIELD_ID" ]; then
-                echo "Status field not found in project board"
-              else
-                echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
-                
-                # Find the In Progress option ID
-                IN_PROGRESS_OPTION_ID=$(echo "$PROJECT_QUERY_RESULT" | jq -r '.data.organization.projectV2.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == "In progress") | .id')
-                
-                if [ -z "$IN_PROGRESS_OPTION_ID" ]; then
-                  echo "In progress status option not found in project board"
-                else
-                  # Update status to "In Progress"
-                  gh api graphql -f query='
-                    mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
-                      updateProjectV2ItemFieldValue(input: {
-                        projectId: $project
-                        itemId: $item
-                        fieldId: $field
-                        value: { 
-                          singleSelectOptionId: $value
-                        }
-                      }) {
-                        projectV2Item {
-                          id
-                        }
-                      }
-                    }' -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$STATUS_FIELD_ID" -f value="$IN_PROGRESS_OPTION_ID"
-                  
-                  echo "Updated issue status to In Progress in project board"
-                fi
-              fi
-            fi
-          else
-            echo "No PROJECT_ID secret found, skipping project board update"
-          fi
-          
-          # Comment that work has started
-          gh issue comment $ISSUE_NUMBER --body "🤖 Claude has started working on this issue. Implementation in progress..."
-          
-          # Create and switch to implementation branch
-          BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
-          git checkout -b $BRANCH_NAME
-          git push -u origin $BRANCH_NAME
-          
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          gh issue comment ${{ github.event.issue.number }} --body "🤖 Claude starting work..."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Prepare prompt file
+      - name: Create branch
         run: |
-          mkdir -p /tmp/claude-prompts
-          cp .github/prompts/implement-issue.txt /tmp/claude-prompts/
+          ISSUE_NUMBER=${{ github.event.issue.number }}
+          BRANCH_NAME="issue-${ISSUE_NUMBER}-implementation"
+          git checkout -b $BRANCH_NAME
           
-          # Add issue-specific context to the prompt
-          echo "Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" >> /tmp/claude-prompts/issue-context.txt
-          echo "Repository: ${{ github.repository }}" >> /tmp/claude-prompts/issue-context.txt
-          echo "Branch: ${{ env.BRANCH_NAME }}" >> /tmp/claude-prompts/issue-context.txt
+          # Create a test file
+          echo "# Test implementation for issue #${ISSUE_NUMBER}" > test-implementation.md
           
-          cat /tmp/claude-prompts/issue-context.txt /tmp/claude-prompts/implement-issue.txt > /tmp/claude-prompts/final-prompt.txt
-      
-      - name: Run Claude Code
-        uses: ./.github/actions/claude-code-action
-        with:
-          prompt_file: /tmp/claude-prompts/final-prompt.txt
-          allowed_tools: "Bash,Read,Write,Edit,Grep,mcp__github__get_issue,mcp__github__get_issue_comments"
-          install_github_mcp: "true"
-          timeout_minutes: "30"
-          anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
-          github_token: "${{ secrets.GITHUB_TOKEN }}"
-      
-      - name: Run tests
-        id: run_tests
-        continue-on-error: true
-        run: |
-          # Repository-specific test command detection
-          if [ -f "Makefile" ] && grep -q "test:" Makefile; then
-            echo "Running tests with make test..."
-            TEST_OUTPUT=$(make test 2>&1) || true
-          elif [ -f "package.json" ] && grep -q "\"test\":" package.json; then
-            echo "Running tests with npm test..."
-            TEST_OUTPUT=$(npm test 2>&1) || true
-          elif [ -f "go.mod" ]; then
-            echo "Running tests with go test..."
-            TEST_OUTPUT=$(go test ./... 2>&1) || true
-          elif [ -f "requirements.txt" ] || [ -f "setup.py" ]; then
-            echo "Running tests with pytest..."
-            TEST_OUTPUT=$(python -m pytest 2>&1) || true
-          else
-            echo "No test command detected."
-            TEST_OUTPUT="No tests run - couldn't determine appropriate test command."
-          fi
-          
-          # Escape test output for GitHub Actions
-          echo "TEST_OUTPUT<<EOF" >> $GITHUB_ENV
-          echo "$TEST_OUTPUT" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-      
-      - name: Create PR and update status
-        run: |
-          # Check if any changes were made
-          if [[ -z $(git status -s) ]]; then
-            echo "No changes were made by Claude."
-            gh issue comment ${{ env.ISSUE_NUMBER }} --body "❌ Claude was unable to implement a solution for this issue. No changes were made."
-            exit 1
-          fi
-          
-          # Commit and push changes
-          git add .
+          # Commit and push
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
-          git push -u origin ${{ env.BRANCH_NAME }}
+          git add test-implementation.md
+          git commit -m "Test implementation for issue #${ISSUE_NUMBER}"
+          git push -u origin $BRANCH_NAME
           
-          # Create PR body file
-          cat > /tmp/pr-body.md << EOF
-          Fixes #${{ env.ISSUE_NUMBER }}
+          # Create PR
+          PR_URL=$(gh pr create --title "Test Fix for issue #${ISSUE_NUMBER}" --body "Fixes #${ISSUE_NUMBER}
 
-          ## Changes
-          - Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
-          - Implemented by Claude Code
+This is a test PR implementation to validate GitHub Actions workflow.
 
-          ## Test Results
-          \`\`\`
-          ${{ env.TEST_OUTPUT }}
-          \`\`\`
-
-          ## Implementation Notes
-          - This PR was created automatically by Claude Code
-          - Please review the changes carefully
-          EOF
+Generated by GitHub Actions." --base main)
           
-          # Create PR using file for body
-          PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
-          
-          # Update project board status if applicable
-          if [ -n "${{ env.PROJECT_ID }}" ] && [ -n "${{ env.ITEM_ID }}" ] && [ -n "${{ env.STATUS_FIELD_ID }}" ]; then
-            echo "Updating project board status to Review..."
-            
-            # Get Review status option ID
-            REVIEW_OPTION_ID=$(gh api graphql -f query='
-              query($org: String!, $project: Int!, $fieldId: ID!) {
-                organization(login: $org) {
-                  projectV2(number: $project) {
-                    field(id: $fieldId) {
-                      ... on ProjectV2SingleSelectField {
-                        options {
-                          id
-                          name
-                        }
-                      }
-                    }
-                  }
-                }
-              }' -f org="${{ github.repository_owner }}" -f project="${{ env.PROJECT_ID }}" -f fieldId="${{ env.STATUS_FIELD_ID }}" | 
-              jq -r '.data.organization.projectV2.field.options[] | select(.name == "Review") | .id' | head -1)
-            
-            if [ -n "$REVIEW_OPTION_ID" ]; then
-              # Update status to "Review"
-              gh api graphql -f query='
-                mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $project
-                    itemId: $item
-                    fieldId: $field
-                    value: { 
-                      singleSelectOptionId: $value
-                    }
-                  }) {
-                    projectV2Item {
-                      id
-                    }
-                  }
-                }' -f project="${{ env.PROJECT_ID }}" -f item="${{ env.ITEM_ID }}" -f field="${{ env.STATUS_FIELD_ID }}" -f value="$REVIEW_OPTION_ID"
-              
-              echo "Updated issue status to Review in project board"
-              STATUS_UPDATE=", and status updated to Review"
-            else
-              echo "Review status option not found in project board"
-              STATUS_UPDATE=""
-            fi
-          else
-            STATUS_UPDATE=""
-          fi
-          
-          # Add comment to issue
-          gh issue comment ${{ env.ISSUE_NUMBER }} --body "✅ Implementation completed and PR submitted: $PR_URL$STATUS_UPDATE"
+          # Comment with success
+          gh issue comment ${ISSUE_NUMBER} --body "✅ Created test PR: ${PR_URL}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
