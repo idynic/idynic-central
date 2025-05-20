@@ -54,7 +54,7 @@ jobs:
         uses: ./.github/actions/claude-code-action
         with:
           prompt_file: /tmp/claude-prompts/final-prompt.txt
-          allowed_tools: "Bash,Read,Write,Edit,Grep,mcp__github__get_issue,mcp__github__get_issue_comments"
+          allowed_tools: "Bash,Read,Write,Edit,Grep,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__search_repositories"
           install_github_mcp: "true"
           timeout_minutes: "30"
           anthropic_api_key: "${{ secrets.ANTHROPIC_API_KEY }}"
