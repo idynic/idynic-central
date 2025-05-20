@@ -195,9 +195,26 @@ jobs:
           git commit -m "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}"
           git push -u origin ${{ env.BRANCH_NAME }}
           
-          # Create very simple PR to avoid any YAML issues
-          BODY="Fixes #${{ env.ISSUE_NUMBER }}"
-          PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body "$BODY" --base main)
+          # Create PR body file
+          cat > /tmp/pr-body.md << EOF
+          Fixes #${{ env.ISSUE_NUMBER }}
+
+          ## Changes
+          - Implemented solution for issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+          - Implemented by Claude Code
+
+          ## Test Results
+          \`\`\`
+          ${{ env.TEST_OUTPUT }}
+          \`\`\`
+
+          ## Implementation Notes
+          - This PR was created automatically by Claude Code
+          - Please review the changes carefully
+          EOF
+          
+          # Create PR using file for body
+          PR_URL=$(gh pr create --title "Fix issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}" --body-file /tmp/pr-body.md --base main)
           
           # Update project board status if applicable
           if [ -n "${{ env.PROJECT_ID }}" ] && [ -n "${{ env.ITEM_ID }}" ] && [ -n "${{ env.STATUS_FIELD_ID }}" ]; then
