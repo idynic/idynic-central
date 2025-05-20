@@ -235,14 +235,17 @@ jobs:
               
               echo "Creating issue in ${REPO_ORG}/${REPO_NAME}"
               
-              # Create the issue
-              ISSUE_URL=$(gh issue create --repo "${REPO_ORG}/${REPO_NAME}" --title "$TITLE" --body-file /tmp/issue-body.md --label "from-prd" || echo "")
+              # Create the issue (without requiring labels)
+              ISSUE_URL=$(gh issue create --repo "${REPO_ORG}/${REPO_NAME}" --title "$TITLE" --body-file /tmp/issue-body.md || echo "")
               
               if [ -z "$ISSUE_URL" ]; then
                 echo "Failed to create issue in ${REPO_ORG}/${REPO_NAME}"
                 echo "- ⚠️ ~~$TITLE~~ (Failed to create in $REPO_NAME)" >> /tmp/task-summary.md
                 continue
               fi
+              
+              # Try to add label only if issue creation was successful (but don't fail if label doesn't exist)
+              gh issue edit "$ISSUE_URL" --add-label "from-prd" 2>/dev/null || echo "Note: Could not add 'from-prd' label (it may not exist)"
               
               ISSUE_NUMBER=$(echo $ISSUE_URL | grep -oP '(?<=issues/)[0-9]+$')
               
@@ -281,9 +284,9 @@ jobs:
                 echo "Could not find project #$PROJECT_NUMBER for organization $REPO_ORG"
               fi
               
-              # Add priority label if available
+              # Add priority label if available (but don't fail if it doesn't exist)
               if [ -n "$PRIORITY" ]; then
-                gh issue edit "$ISSUE_URL" --add-label "priority:$PRIORITY" || echo "Priority label not found"
+                gh issue edit "$ISSUE_URL" --add-label "priority:$PRIORITY" 2>/dev/null || echo "Note: Could not add priority label (it may not exist)"
               fi
               
               # Add to summary
