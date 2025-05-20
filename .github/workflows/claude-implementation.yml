@@ -68,10 +68,12 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          PROJECT_ID_SECRET: ${{ secrets.PROJECT_ID || '' }}
           
       - name: Prepare prompt file
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          PROJECT_ID_SECRET: ${{ secrets.PROJECT_ID || '' }}
         run: |
           mkdir -p /tmp/claude-prompts
           
@@ -147,6 +149,9 @@ jobs:
           github_token: "${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}"
       
       - name: Process Claude's output
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          PROJECT_ID_SECRET: ${{ secrets.PROJECT_ID || '' }}
         run: |
           # Process based on mode
           if [[ "${{ env.MODE }}" == "analyze" ]]; then
@@ -255,16 +260,21 @@ jobs:
               # Use the GraphQL API to add the issue to the project
               PROJECT_NUMBER=2
               
-              # First, we need the project ID
-              # Project number needs special formatting for GraphQL as Int!
-              PROJECT_ID=$(gh api graphql -f query='
-                query($org: String!, $number: Int!) {
-                  organization(login: $org) {
-                    projectV2(number: $number) {
-                      id
+              # Use the project ID directly from secrets instead of querying by number
+              # This bypasses the GraphQL type conversion issue
+              PROJECT_ID="$PROJECT_ID_SECRET"
+              if [ -z "$PROJECT_ID" ]; then
+                echo "No PROJECT_ID_SECRET provided, trying to get it from GraphQL"
+                # Fallback to querying, with fixed number format
+                PROJECT_ID=$(gh api graphql -f query='
+                  query($org: String!, $number: Int!) {
+                    organization(login: $org) {
+                      projectV2(number: $number) {
+                        id
+                      }
                     }
-                  }
-                }' -f org="${REPO_ORG}" -f "number=2" -q '.data.organization.projectV2.id' || echo "")
+                  }' -f org="${REPO_ORG}" -f number=2 -q '.data.organization.projectV2.id' || echo "")
+              fi
               
               if [ -n "$PROJECT_ID" ]; then
                 echo "Adding issue to project board..."
